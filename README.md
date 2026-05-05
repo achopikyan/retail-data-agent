@@ -32,20 +32,50 @@ pip install -r requirements.txt
 
 ### 2. Configure credentials
 
-```bash
-cp .env.example .env
-# Edit .env and set:
-#   GOOGLE_API_KEY        — from https://aistudio.google.com/apikey
-#   GOOGLE_CLOUD_PROJECT  — your GCP project (used as billing project for BQ)
-```
+You need **two** things:
 
-Then authenticate Application Default Credentials for BigQuery:
+#### 2a. Gemini API key (always required)
+
+Free key from <https://aistudio.google.com/apikey>. No credit card; takes 10 seconds. Note: getting an AI Studio key auto-creates a GCP project named `gen-lang-client-XXXXXXX` for you — that's the project you can use for BigQuery too.
+
+#### 2b. BigQuery credentials (pick one path)
+
+The agent calls BigQuery on every analysis turn. You need one of:
+
+**Path A — Service account JSON** (recommended, no interactive flow):
+
+1. Open <https://console.cloud.google.com> → make sure a project is selected (use the auto-created `gen-lang-client-…` one or your own).
+2. Enable BigQuery API: <https://console.cloud.google.com/apis/library/bigquery.googleapis.com> → **Enable**.
+3. Create a service account: <https://console.cloud.google.com/iam-admin/serviceaccounts> → **+ Create service account** → name `retail-agent` → role **BigQuery User** → **Done**.
+4. Click the SA → **Keys** tab → **Add Key → Create new key → JSON**. A file downloads.
+5. Save that JSON somewhere accessible (e.g. `./sa-key.json`).
+
+**Path B — gcloud ADC** (interactive, requires a browser):
 
 ```bash
 gcloud auth application-default login
 ```
 
-> The `thelook_ecommerce` dataset is a Google public dataset and is free to query under the 1TB/month BigQuery free tier.
+#### 2c. Write `.env`
+
+```bash
+cp .env.example .env
+```
+
+Edit `.env`:
+
+```
+# 2a — Gemini
+GOOGLE_API_KEY=AIza...your-ai-studio-key
+
+# 2b — BigQuery: project to bill queries to (uses the 1 TB/mo free tier)
+GOOGLE_CLOUD_PROJECT=gen-lang-client-0000000000
+
+# 2b — BigQuery auth (choose ONE of the two; Path B works without setting this)
+GOOGLE_APPLICATION_CREDENTIALS=/absolute/path/to/sa-key.json
+```
+
+> The `thelook_ecommerce` dataset is a Google public dataset — free to query under your project's 1 TB/month BigQuery free tier. No billing setup required.
 
 ### 3. Seed the Golden Bucket (one-time, idempotent)
 
@@ -53,7 +83,7 @@ gcloud auth application-default login
 python -m scripts.seed_golden_bucket
 ```
 
-This embeds the 12 hand-written analyst Trios in `data/golden_trios.json` using `text-embedding-004` and caches the vectors at `data/golden_trios.embeddings.npy`.
+This embeds the 12 hand-written analyst Trios in `data/golden_trios.json` using `gemini-embedding-001` and caches the vectors at `data/golden_trios.embeddings.npy`.
 
 ### 4. Run the agent
 
