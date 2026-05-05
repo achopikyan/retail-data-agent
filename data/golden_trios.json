@@ -1,0 +1,86 @@
+[
+  {
+    "id": "trio-001",
+    "question": "Who are the top 10 customers by total spend all-time?",
+    "sql": "SELECT u.id AS user_id, u.first_name, u.last_name, u.email, ROUND(SUM(oi.sale_price), 2) AS total_spend, COUNT(DISTINCT oi.order_id) AS orders FROM `bigquery-public-data.thelook_ecommerce.order_items` oi JOIN `bigquery-public-data.thelook_ecommerce.users` u ON u.id = oi.user_id WHERE oi.status NOT IN ('Cancelled','Returned') GROUP BY u.id, u.first_name, u.last_name, u.email ORDER BY total_spend DESC LIMIT 10",
+    "report": "Top 10 customers by lifetime spend, excluding cancelled/returned items. Customer identity columns are masked in the report; use the user_id for follow-up. Spend is sum of sale_price across all order_items in valid statuses.",
+    "tags": ["customers", "lifetime_value", "top_n"]
+  },
+  {
+    "id": "trio-002",
+    "question": "What is monthly revenue for the last 12 months?",
+    "sql": "SELECT FORMAT_DATE('%Y-%m', DATE(oi.created_at)) AS month, ROUND(SUM(oi.sale_price), 2) AS revenue, COUNT(DISTINCT oi.order_id) AS orders FROM `bigquery-public-data.thelook_ecommerce.order_items` oi WHERE oi.status NOT IN ('Cancelled','Returned') AND DATE(oi.created_at) >= DATE_SUB(CURRENT_DATE(), INTERVAL 12 MONTH) GROUP BY month ORDER BY month",
+    "report": "Monthly revenue series for the trailing 12 months. We exclude cancelled and returned line items. Compare month-over-month deltas to find inflection points; check for seasonality before flagging anomalies.",
+    "tags": ["revenue", "time_series", "monthly"]
+  },
+  {
+    "id": "trio-003",
+    "question": "Which product categories drive the most revenue this year?",
+    "sql": "SELECT p.category, ROUND(SUM(oi.sale_price), 2) AS revenue, COUNT(*) AS units_sold FROM `bigquery-public-data.thelook_ecommerce.order_items` oi JOIN `bigquery-public-data.thelook_ecommerce.products` p ON p.id = oi.product_id WHERE oi.status NOT IN ('Cancelled','Returned') AND EXTRACT(YEAR FROM oi.created_at) = EXTRACT(YEAR FROM CURRENT_DATE()) GROUP BY p.category ORDER BY revenue DESC",
+    "report": "Year-to-date revenue by product category, with units sold for context. Cancelled/returned line items excluded. High revenue + low units = premium pricing; low revenue + high units = volume play.",
+    "tags": ["products", "category", "ytd", "revenue"]
+  },
+  {
+    "id": "trio-004",
+    "question": "What's the average order value (AOV) over the last 90 days?",
+    "sql": "WITH order_totals AS (SELECT order_id, SUM(sale_price) AS order_total FROM `bigquery-public-data.thelook_ecommerce.order_items` WHERE status NOT IN ('Cancelled','Returned') AND DATE(created_at) >= DATE_SUB(CURRENT_DATE(), INTERVAL 90 DAY) GROUP BY order_id) SELECT ROUND(AVG(order_total), 2) AS aov, COUNT(*) AS orders FROM order_totals",
+    "report": "Average order value over the trailing 90 days, computed on completed/processing orders. Compare to historical AOV to detect basket-size shifts.",
+    "tags": ["aov", "trailing_90", "orders"]
+  },
+  {
+    "id": "trio-005",
+    "question": "Which traffic source brings the highest-value customers?",
+    "sql": "SELECT u.traffic_source, COUNT(DISTINCT u.id) AS customers, ROUND(SUM(oi.sale_price), 2) AS revenue, ROUND(SUM(oi.sale_price)/NULLIF(COUNT(DISTINCT u.id),0), 2) AS revenue_per_customer FROM `bigquery-public-data.thelook_ecommerce.users` u JOIN `bigquery-public-data.thelook_ecommerce.order_items` oi ON oi.user_id = u.id WHERE oi.status NOT IN ('Cancelled','Returned') GROUP BY u.traffic_source ORDER BY revenue_per_customer DESC",
+    "report": "Traffic source ranked by revenue per acquired customer. Distinguish acquisition efficiency from raw volume — a small high-value channel can outperform a large low-value one.",
+    "tags": ["traffic", "acquisition", "ltv"]
+  },
+  {
+    "id": "trio-006",
+    "question": "How many orders are currently in each status?",
+    "sql": "SELECT status, COUNT(*) AS orders FROM `bigquery-public-data.thelook_ecommerce.orders` GROUP BY status ORDER BY orders DESC",
+    "report": "Snapshot of order pipeline by status. Watch the ratio of Cancelled and Returned vs Complete — sustained increases warrant a deeper investigation into product or fulfillment quality.",
+    "tags": ["orders", "pipeline", "status"]
+  },
+  {
+    "id": "trio-007",
+    "question": "What is the return rate by product category?",
+    "sql": "SELECT p.category, COUNTIF(oi.status = 'Returned') AS returned, COUNT(*) AS total, ROUND(100 * COUNTIF(oi.status = 'Returned') / NULLIF(COUNT(*),0), 2) AS return_rate_pct FROM `bigquery-public-data.thelook_ecommerce.order_items` oi JOIN `bigquery-public-data.thelook_ecommerce.products` p ON p.id = oi.product_id GROUP BY p.category HAVING total > 50 ORDER BY return_rate_pct DESC",
+    "report": "Return rate by product category, restricted to categories with at least 50 line items for stability. High return rates often indicate sizing, quality, or expectation-mismatch issues — drill into top SKUs in the category to confirm.",
+    "tags": ["returns", "category", "quality"]
+  },
+  {
+    "id": "trio-008",
+    "question": "What does the orders table look like? Describe its columns.",
+    "sql": "SELECT column_name, data_type FROM `bigquery-public-data.thelook_ecommerce.INFORMATION_SCHEMA.COLUMNS` WHERE table_name = 'orders'",
+    "report": "Schema of the orders table. Use this to understand what fields are available before composing a custom query. Note status, created_at, shipped_at, delivered_at — these are the time anchors for funnel analysis.",
+    "tags": ["schema", "metadata", "orders"]
+  },
+  {
+    "id": "trio-009",
+    "question": "Top selling products by units this month",
+    "sql": "SELECT p.id AS product_id, p.name, p.category, COUNT(*) AS units_sold, ROUND(SUM(oi.sale_price),2) AS revenue FROM `bigquery-public-data.thelook_ecommerce.order_items` oi JOIN `bigquery-public-data.thelook_ecommerce.products` p ON p.id = oi.product_id WHERE oi.status NOT IN ('Cancelled','Returned') AND DATE_TRUNC(DATE(oi.created_at), MONTH) = DATE_TRUNC(CURRENT_DATE(), MONTH) GROUP BY p.id, p.name, p.category ORDER BY units_sold DESC LIMIT 20",
+    "report": "Top 20 products by units sold in the current calendar month. Look for recent launches climbing fast, and for stalwarts whose rank is dropping — both deserve attention.",
+    "tags": ["products", "top_n", "current_month"]
+  },
+  {
+    "id": "trio-010",
+    "question": "New customer acquisition by month",
+    "sql": "SELECT FORMAT_DATE('%Y-%m', DATE(created_at)) AS month, COUNT(*) AS new_customers FROM `bigquery-public-data.thelook_ecommerce.users` GROUP BY month ORDER BY month",
+    "report": "Customer signups per calendar month. Pair with revenue trend to see whether growth is acquisition-led or basket-led.",
+    "tags": ["acquisition", "users", "time_series"]
+  },
+  {
+    "id": "trio-011",
+    "question": "Which countries generate the most revenue?",
+    "sql": "SELECT u.country, ROUND(SUM(oi.sale_price),2) AS revenue, COUNT(DISTINCT u.id) AS customers FROM `bigquery-public-data.thelook_ecommerce.users` u JOIN `bigquery-public-data.thelook_ecommerce.order_items` oi ON oi.user_id = u.id WHERE oi.status NOT IN ('Cancelled','Returned') GROUP BY u.country ORDER BY revenue DESC LIMIT 15",
+    "report": "Top 15 countries by revenue, with active customer counts. Use revenue per customer to compare market quality, not just size.",
+    "tags": ["geo", "revenue", "country"]
+  },
+  {
+    "id": "trio-012",
+    "question": "Which products were returned the most last quarter?",
+    "sql": "SELECT p.id AS product_id, p.name, p.category, COUNT(*) AS returns FROM `bigquery-public-data.thelook_ecommerce.order_items` oi JOIN `bigquery-public-data.thelook_ecommerce.products` p ON p.id = oi.product_id WHERE oi.status = 'Returned' AND DATE(oi.created_at) >= DATE_SUB(DATE_TRUNC(CURRENT_DATE(), QUARTER), INTERVAL 1 QUARTER) AND DATE(oi.created_at) < DATE_TRUNC(CURRENT_DATE(), QUARTER) GROUP BY p.id, p.name, p.category ORDER BY returns DESC LIMIT 20",
+    "report": "Top 20 most-returned products in the previous calendar quarter. High counts here are leading indicators for warranty claims and category-level reputation hits.",
+    "tags": ["returns", "products", "quarter"]
+  }
+]

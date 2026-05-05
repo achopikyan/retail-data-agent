@@ -1,0 +1,20 @@
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+.env
+*.egg-info/
+.pytest_cache/
+logs/*.jsonl
+data/golden_trios.embeddings.npy
+data/curated_trios.json
+data/app.db
+data/app.db-journal
+.DS_Store
+
+# Frontend
+web/node_modules/
+web/dist/
+web/.vite/
+web/package-lock.json

@@ -1,0 +1,230 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* -------------------------------------------------------------------------
+ *  Editorial Terminal — base styles
+ *  Inspired by financial newsroom typography (FT, Economist, Bloomberg)
+ *  but committed to a warmer, less corporate palette.
+ * ------------------------------------------------------------------------- */
+
+@layer base {
+  html {
+    /* Lock tabular-figures everywhere by default — this is a numbers app. */
+    font-feature-settings: "ss01", "cv11", "tnum", "lnum";
+  }
+
+  body {
+    background-color: theme('colors.paper.DEFAULT');
+    color: theme('colors.ink.DEFAULT');
+    /* Subtle paper grain — SVG fractal noise layered over base color. */
+    background-image:
+      radial-gradient(at 30% 0%, rgba(122, 31, 31, 0.04) 0px, transparent 50%),
+      radial-gradient(at 90% 100%, rgba(63, 107, 92, 0.03) 0px, transparent 50%),
+      url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='240' height='240'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 0.10  0 0 0 0 0.09  0 0 0 0 0.08  0 0 0 0.05 0'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>");
+    background-attachment: fixed;
+    background-size: auto, auto, 240px 240px;
+    font-feature-settings: "ss01", "tnum", "lnum";
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+
+  /* Selection looks like a printer's highlighter pass. */
+  ::selection {
+    background-color: theme('colors.oxblood.soft');
+    color: theme('colors.ink.DEFAULT');
+  }
+
+  /* Custom scrollbar — quiet, paper-toned. */
+  *::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  *::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  *::-webkit-scrollbar-thumb {
+    background: theme('colors.rule.DEFAULT');
+    border: 2px solid theme('colors.paper.DEFAULT');
+    border-radius: 999px;
+  }
+  *::-webkit-scrollbar-thumb:hover {
+    background: theme('colors.rule.strong');
+  }
+
+  /* Typographic baseline. */
+  h1, h2, h3, h4 {
+    font-family: theme('fontFamily.display');
+    font-feature-settings: "ss01", "lnum", "kern";
+    letter-spacing: -0.01em;
+  }
+}
+
+/* -------------------------------------------------------------------------
+ *  Component primitives — minimal layer, intentionally small.
+ * ------------------------------------------------------------------------- */
+
+@layer components {
+  /* "Section label" — small caps + tracking + horizontal rule above. */
+  .eyebrow {
+    @apply uppercase font-mono text-[10.5px] font-medium text-ink-3
+           tracking-section flex items-center gap-2;
+  }
+  .eyebrow::before {
+    content: '';
+    @apply inline-block w-6 h-px bg-rule-strong;
+  }
+
+  .display {
+    @apply font-display text-[28px] leading-[1.1] tracking-tight font-medium;
+    font-variation-settings: "SOFT" 30, "WONK" 0, "opsz" 72;
+  }
+
+  .display-lg {
+    @apply font-display text-[44px] leading-[1.02] tracking-tight font-medium;
+    font-variation-settings: "SOFT" 50, "WONK" 1, "opsz" 144;
+  }
+
+  .lede {
+    @apply font-display text-[17px] leading-[1.45] text-ink-2 italic;
+    font-variation-settings: "SOFT" 100, "opsz" 24;
+  }
+
+  /* Hairline rule — 1px, paper-warm. */
+  .rule-h {
+    @apply border-t border-rule;
+  }
+
+  /* Buttons — the "press the typewriter key" style. */
+  .btn {
+    @apply inline-flex items-center justify-center gap-1.5 px-3.5 py-2
+           text-[13px] font-medium tracking-tight
+           transition-[background-color,color,border-color,transform] duration-150
+           border border-transparent
+           focus:outline-none focus-visible:ring-2 focus-visible:ring-oxblood/40 focus-visible:ring-offset-2 focus-visible:ring-offset-paper
+           disabled:opacity-40 disabled:cursor-not-allowed;
+  }
+  .btn-primary {
+    @apply btn bg-ink text-paper border-ink hover:bg-oxblood hover:border-oxblood active:translate-y-px;
+  }
+  .btn-secondary {
+    @apply btn bg-paper-raised text-ink border-rule hover:border-ink-3 hover:bg-paper-sunken active:translate-y-px;
+  }
+  .btn-danger {
+    @apply btn bg-oxblood text-paper border-oxblood hover:bg-oxblood-hover hover:border-oxblood-hover active:translate-y-px;
+  }
+  .btn-ghost {
+    @apply btn bg-transparent text-ink-2 hover:text-ink hover:bg-paper-sunken;
+  }
+
+  .input {
+    @apply w-full bg-paper-raised border border-rule px-3 py-2
+           text-[13px] text-ink placeholder:text-ink-3
+           focus:outline-none focus:border-ink focus:bg-paper-raised
+           transition-colors duration-150;
+  }
+
+  .surface {
+    /* "Sheet of paper on the desk" — used by cards. */
+    @apply bg-paper-raised border border-rule;
+    box-shadow: 0 1px 0 rgba(26, 24, 21, 0.03), 0 0 0 1px rgba(26, 24, 21, 0.02);
+  }
+
+  .surface-elevated {
+    @apply bg-paper-raised border border-rule;
+    box-shadow:
+      0 1px 0 rgba(26, 24, 21, 0.05),
+      0 12px 28px -18px rgba(26, 24, 21, 0.25);
+  }
+
+  .badge {
+    @apply inline-flex items-center gap-1 px-2 py-0.5 text-[10.5px] font-mono font-medium
+           tracking-section uppercase border;
+  }
+  .badge-ink   { @apply badge bg-ink text-paper border-ink; }
+  .badge-quiet { @apply badge bg-paper-sunken text-ink-2 border-rule; }
+  .badge-warn  { @apply badge bg-ochre/15 text-ink border-ochre/60; }
+  .badge-blood { @apply badge bg-oxblood text-paper border-oxblood; }
+  .badge-good  { @apply badge bg-verdigris/15 text-ink border-verdigris/60; }
+
+  /* Tabular numbers utility for data-heavy tables. */
+  .tnum { font-variant-numeric: tabular-nums lining-nums; }
+
+  /* Animated streaming caret. */
+  .caret::after {
+    content: '▍';
+    @apply text-oxblood ml-0.5 animate-caret;
+  }
+
+  /* ---------------------------------------------------------------------
+   *  Markdown rendering — editorial, not GitHub-default.
+   * --------------------------------------------------------------------- */
+  .report-md {
+    @apply text-[14px] leading-[1.65] text-ink;
+  }
+  .report-md > *:first-child { margin-top: 0; }
+  .report-md h1 {
+    @apply font-display text-[22px] leading-tight font-medium mt-5 mb-2 tracking-tight;
+    font-variation-settings: "SOFT" 30, "opsz" 72;
+  }
+  .report-md h2 {
+    @apply font-display text-[18px] leading-snug font-medium mt-5 mb-2 tracking-tight;
+    font-variation-settings: "SOFT" 30, "opsz" 48;
+  }
+  .report-md h3 {
+    @apply font-sans uppercase tracking-section text-[11px] text-ink-3 font-medium mt-4 mb-1;
+  }
+  .report-md p { @apply my-2.5; }
+  .report-md ul {
+    @apply my-2.5 pl-0 space-y-1.5;
+    list-style: none;
+  }
+  .report-md ul > li {
+    @apply pl-5 relative;
+  }
+  .report-md ul > li::before {
+    content: '—';
+    @apply absolute left-0 text-ink-3 font-mono;
+  }
+  .report-md ol { @apply list-decimal pl-5 my-2.5 space-y-1.5 marker:text-ink-3 marker:font-mono; }
+  .report-md strong { @apply font-semibold text-ink; }
+  .report-md em { @apply italic text-ink-2; }
+  .report-md a { @apply text-oxblood underline underline-offset-2 decoration-oxblood/40 hover:decoration-oxblood; }
+  .report-md code {
+    @apply font-mono text-[12px] bg-paper-sunken text-ink px-1 py-0.5 border border-rule;
+  }
+  .report-md pre {
+    @apply font-mono text-[12px] bg-ink text-paper my-3 p-3 overflow-x-auto border border-ink;
+  }
+  .report-md pre code { @apply bg-transparent text-paper p-0 border-0; }
+  .report-md blockquote {
+    @apply border-l-2 border-oxblood pl-3 my-3 text-ink-2 italic font-display;
+    font-variation-settings: "SOFT" 100, "opsz" 24;
+  }
+  .report-md table {
+    @apply my-3 w-full text-[12.5px] tnum border-t border-b border-ink-2;
+    border-collapse: collapse;
+  }
+  .report-md thead {
+    @apply border-b border-ink-2;
+  }
+  .report-md th {
+    @apply text-left font-sans uppercase tracking-section text-[10px] text-ink-3 font-medium py-1.5 px-2;
+  }
+  .report-md td {
+    @apply py-1.5 px-2 border-b border-rule;
+  }
+  .report-md tbody tr:last-child td { @apply border-b-0; }
+  .report-md hr { @apply my-4 border-rule; }
+}
+
+/* -------------------------------------------------------------------------
+ *  Stagger helpers — used on initial load.
+ * ------------------------------------------------------------------------- */
+.stagger > * { animation: fade-up 600ms cubic-bezier(0.16, 1, 0.3, 1) both; }
+.stagger > *:nth-child(1) { animation-delay: 40ms; }
+.stagger > *:nth-child(2) { animation-delay: 90ms; }
+.stagger > *:nth-child(3) { animation-delay: 140ms; }
+.stagger > *:nth-child(4) { animation-delay: 190ms; }
+.stagger > *:nth-child(5) { animation-delay: 240ms; }
+.stagger > *:nth-child(6) { animation-delay: 290ms; }

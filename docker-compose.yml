@@ -1,0 +1,36 @@
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    container_name: retail-agent-api
+    environment:
+      GOOGLE_API_KEY: ${GOOGLE_API_KEY:-}
+      GOOGLE_CLOUD_PROJECT: ${GOOGLE_CLOUD_PROJECT:-}
+      DEFAULT_USER_ID: ${DEFAULT_USER_ID:-demo_manager}
+      # ADC inside the container points at the mounted volume below.
+      GOOGLE_APPLICATION_CREDENTIALS: /root/.config/gcloud/application_default_credentials.json
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+      - ./config:/app/config
+      # GCP Application Default Credentials so BigQuery works.
+      # On Linux/macOS: ~/.config/gcloud
+      - ${GCLOUD_CONFIG:-~/.config/gcloud}:/root/.config/gcloud:ro
+    ports:
+      - "8000:8000"
+    healthcheck:
+      test: ["CMD-SHELL", "python -c 'import urllib.request; urllib.request.urlopen(\"http://localhost:8000/healthz\").read()'"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  web:
+    build:
+      context: ./web
+      dockerfile: Dockerfile
+    container_name: retail-agent-web
+    depends_on:
+      - api
+    ports:
+      - "5173:80"

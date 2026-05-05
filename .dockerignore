@@ -1,0 +1,15 @@
+.git
+.venv
+venv
+__pycache__
+*.pyc
+.pytest_cache
+logs/session_*.jsonl
+data/app.db
+data/app.db-journal
+data/curated_trios.json
+data/golden_trios.embeddings.npy
+web/node_modules
+web/dist
+.env
+.DS_Store
