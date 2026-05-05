@@ -1,8 +1,11 @@
 """Golden Bucket: load Trios, embed once, retrieve top-k by cosine.
 
-We use Google's `text-embedding-004` via langchain-google-genai. Embeddings
-are persisted to a .npy file so we don't re-embed on every boot. Cosine
-similarity is computed in numpy — no vector DB needed for this scale.
+We use Google's `gemini-embedding-001` via langchain-google-genai (override
+via GEMINI_EMBEDDING_MODEL in .env). Embeddings are persisted to a .npy
+file so we don't re-embed on every boot. Cosine similarity is computed
+in numpy — no vector DB needed for this scale (≤ a few thousand Trios).
+At higher scale, swap in Vertex AI Vector Search or pgvector — see
+ARCHITECTURE.md §3.1.
 """
 from __future__ import annotations
 

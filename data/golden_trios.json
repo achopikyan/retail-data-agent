@@ -82,5 +82,96 @@
     "sql": "SELECT p.id AS product_id, p.name, p.category, COUNT(*) AS returns FROM `bigquery-public-data.thelook_ecommerce.order_items` oi JOIN `bigquery-public-data.thelook_ecommerce.products` p ON p.id = oi.product_id WHERE oi.status = 'Returned' AND DATE(oi.created_at) >= DATE_SUB(DATE_TRUNC(CURRENT_DATE(), QUARTER), INTERVAL 1 QUARTER) AND DATE(oi.created_at) < DATE_TRUNC(CURRENT_DATE(), QUARTER) GROUP BY p.id, p.name, p.category ORDER BY returns DESC LIMIT 20",
     "report": "Top 20 most-returned products in the previous calendar quarter. High counts here are leading indicators for warranty claims and category-level reputation hits.",
     "tags": ["returns", "products", "quarter"]
+  },
+  {
+    "id": "trio-013",
+    "question": "What is the next-month retention rate by signup cohort for the last year?",
+    "sql": "WITH first_orders AS (SELECT user_id, MIN(DATE(created_at)) AS first_order_date FROM `bigquery-public-data.thelook_ecommerce.orders` GROUP BY user_id), cohorts AS (SELECT user_id, DATE_TRUNC(first_order_date, MONTH) AS cohort_month FROM first_orders), retained AS (SELECT DISTINCT c.cohort_month, c.user_id FROM cohorts c JOIN `bigquery-public-data.thelook_ecommerce.orders` o ON o.user_id = c.user_id AND DATE_TRUNC(DATE(o.created_at), MONTH) = DATE_ADD(c.cohort_month, INTERVAL 1 MONTH)) SELECT c.cohort_month, COUNT(DISTINCT c.user_id) AS cohort_size, COUNT(DISTINCT r.user_id) AS retained_next_month, ROUND(100 * COUNT(DISTINCT r.user_id) / NULLIF(COUNT(DISTINCT c.user_id),0), 2) AS retention_pct FROM cohorts c LEFT JOIN retained r USING (cohort_month, user_id) WHERE c.cohort_month >= DATE_SUB(DATE_TRUNC(CURRENT_DATE(), MONTH), INTERVAL 12 MONTH) GROUP BY c.cohort_month ORDER BY c.cohort_month",
+    "report": "Next-month retention by signup cohort, last 12 months. Read columns left-to-right: month, fresh customers acquired, of those how many came back the next month, and the resulting retention percentage. Compare cohorts to find acquisition campaigns that bring in 'sticky' customers vs one-and-done buyers.",
+    "tags": ["cohort", "retention", "ltv", "monthly"]
+  },
+  {
+    "id": "trio-014",
+    "question": "Top 15 brands by revenue all time",
+    "sql": "SELECT p.brand, COUNT(*) AS units_sold, ROUND(SUM(oi.sale_price), 2) AS revenue FROM `bigquery-public-data.thelook_ecommerce.order_items` oi JOIN `bigquery-public-data.thelook_ecommerce.products` p ON p.id = oi.product_id WHERE oi.status NOT IN ('Cancelled','Returned') GROUP BY p.brand ORDER BY revenue DESC LIMIT 15",
+    "report": "Top 15 brands by all-time net revenue. Brand concentration matters — if the top three account for >40% of revenue, supplier risk is high. Pair with return-rate-by-brand to spot brands that look big on revenue but bleed margin via returns.",
+    "tags": ["brands", "revenue", "top_n"]
+  },
+  {
+    "id": "trio-015",
+    "question": "How does revenue split by customer gender?",
+    "sql": "SELECT u.gender, COUNT(DISTINCT u.id) AS customers, ROUND(SUM(oi.sale_price), 2) AS revenue, ROUND(SUM(oi.sale_price) / NULLIF(COUNT(DISTINCT u.id), 0), 2) AS revenue_per_customer FROM `bigquery-public-data.thelook_ecommerce.users` u JOIN `bigquery-public-data.thelook_ecommerce.order_items` oi ON oi.user_id = u.id WHERE oi.status NOT IN ('Cancelled','Returned') GROUP BY u.gender ORDER BY revenue DESC",
+    "report": "Revenue and active-customer count by self-reported gender, with revenue-per-customer for normalised comparison. A wide gap in revenue-per-customer is more actionable than a gap in raw revenue (which often just reflects audience size).",
+    "tags": ["customers", "gender", "segmentation"]
+  },
+  {
+    "id": "trio-016",
+    "question": "What's our average delivery time on orders shipped in the last 90 days?",
+    "sql": "SELECT ROUND(AVG(TIMESTAMP_DIFF(delivered_at, created_at, HOUR)) / 24, 2) AS avg_days_to_delivery, COUNTIF(delivered_at IS NOT NULL) AS delivered_orders, COUNT(*) AS total_orders FROM `bigquery-public-data.thelook_ecommerce.orders` WHERE DATE(created_at) >= DATE_SUB(CURRENT_DATE(), INTERVAL 90 DAY)",
+    "report": "Mean order-to-delivery interval in days, computed over orders placed in the last 90 days that have a delivery timestamp. The denominator (delivered_orders/total_orders) is itself a fulfillment-completion signal — if it drops, the SLA average alone won't tell you whether shipping slowed or backlog grew.",
+    "tags": ["fulfillment", "sla", "trailing_90"]
+  },
+  {
+    "id": "trio-017",
+    "question": "How much revenue did we lose to returns each month over the last year?",
+    "sql": "SELECT FORMAT_DATE('%Y-%m', DATE(returned_at)) AS month, COUNT(*) AS returned_items, ROUND(SUM(sale_price), 2) AS returned_revenue FROM `bigquery-public-data.thelook_ecommerce.order_items` WHERE status = 'Returned' AND returned_at IS NOT NULL AND DATE(returned_at) >= DATE_SUB(CURRENT_DATE(), INTERVAL 12 MONTH) GROUP BY month ORDER BY month",
+    "report": "Monthly returns volume and the revenue value lost to those returns, last 12 months. Trend break? Cross-reference with new SKU launches and recent return-rate-by-category — quality regressions often surface here first.",
+    "tags": ["returns", "revenue_loss", "monthly"]
+  },
+  {
+    "id": "trio-018",
+    "question": "Top 10 US states by revenue",
+    "sql": "SELECT u.state, COUNT(DISTINCT u.id) AS customers, ROUND(SUM(oi.sale_price), 2) AS revenue, ROUND(SUM(oi.sale_price) / NULLIF(COUNT(DISTINCT u.id),0), 2) AS revenue_per_customer FROM `bigquery-public-data.thelook_ecommerce.users` u JOIN `bigquery-public-data.thelook_ecommerce.order_items` oi ON oi.user_id = u.id WHERE oi.status NOT IN ('Cancelled','Returned') AND u.country = 'United States' GROUP BY u.state ORDER BY revenue DESC LIMIT 10",
+    "report": "Top 10 US states by net revenue, with active customers and revenue-per-customer. The latter strips out raw market-size effects — a small state with high RPC can be disproportionately profitable to invest in.",
+    "tags": ["geo", "us_states", "revenue"]
+  },
+  {
+    "id": "trio-019",
+    "question": "How is each distribution center performing in the last 90 days?",
+    "sql": "SELECT p.distribution_center_id, COUNT(*) AS items_shipped, COUNT(DISTINCT oi.order_id) AS orders, ROUND(SUM(oi.sale_price), 2) AS revenue FROM `bigquery-public-data.thelook_ecommerce.order_items` oi JOIN `bigquery-public-data.thelook_ecommerce.products` p ON p.id = oi.product_id WHERE oi.status NOT IN ('Cancelled','Returned') AND DATE(oi.created_at) >= DATE_SUB(CURRENT_DATE(), INTERVAL 90 DAY) GROUP BY p.distribution_center_id ORDER BY revenue DESC",
+    "report": "Distribution-center throughput last 90 days. A DC with disproportionate revenue but average item count signals premium-product concentration there. Use alongside return-by-DC if available to detect quality issues localized to a fulfillment site.",
+    "tags": ["operations", "distribution_center", "trailing_90"]
+  },
+  {
+    "id": "trio-020",
+    "question": "What share of customers have ordered more than once?",
+    "sql": "WITH order_counts AS (SELECT user_id, COUNT(DISTINCT order_id) AS orders FROM `bigquery-public-data.thelook_ecommerce.orders` GROUP BY user_id) SELECT COUNT(*) AS total_customers, COUNTIF(orders > 1) AS repeat_customers, ROUND(100 * COUNTIF(orders > 1) / NULLIF(COUNT(*),0), 2) AS repeat_pct, ROUND(AVG(orders), 2) AS avg_orders_per_customer FROM order_counts",
+    "report": "Repeat-purchase rate across the full customer base. Repeat % is a leading indicator of product–market fit; under-20% almost always means the funnel is leaking after first purchase. Pair with cohort retention to see whether the rate is improving for newer signups.",
+    "tags": ["retention", "repeat_purchase", "ltv"]
+  },
+  {
+    "id": "trio-021",
+    "question": "Which acquisition channel produces the highest lifetime value per customer?",
+    "sql": "WITH user_ltv AS (SELECT u.id AS user_id, u.traffic_source, COALESCE(SUM(CASE WHEN oi.status NOT IN ('Cancelled','Returned') THEN oi.sale_price END), 0) AS lifetime_spend FROM `bigquery-public-data.thelook_ecommerce.users` u LEFT JOIN `bigquery-public-data.thelook_ecommerce.order_items` oi ON oi.user_id = u.id GROUP BY u.id, u.traffic_source) SELECT traffic_source, COUNT(*) AS customers, ROUND(AVG(lifetime_spend), 2) AS avg_ltv, ROUND(SUM(lifetime_spend), 2) AS total_revenue FROM user_ltv GROUP BY traffic_source ORDER BY avg_ltv DESC",
+    "report": "Average lifetime value per acquired customer, by acquisition channel. Includes never-purchased customers in the denominator (LEFT JOIN) so the LTV reflects channel quality, not just buyers. Channels with high avg LTV but low total revenue are under-invested; flip the comparison and you've found over-reliance on volume channels.",
+    "tags": ["acquisition", "ltv", "channels"]
+  },
+  {
+    "id": "trio-022",
+    "question": "Which categories have the highest cancellation rate?",
+    "sql": "SELECT p.category, COUNTIF(oi.status = 'Cancelled') AS cancelled, COUNT(*) AS total_items, ROUND(100 * COUNTIF(oi.status = 'Cancelled') / NULLIF(COUNT(*), 0), 2) AS cancel_rate_pct FROM `bigquery-public-data.thelook_ecommerce.order_items` oi JOIN `bigquery-public-data.thelook_ecommerce.products` p ON p.id = oi.product_id GROUP BY p.category HAVING total_items > 100 ORDER BY cancel_rate_pct DESC",
+    "report": "Cancellation rate by category, restricted to categories with > 100 items for statistical stability. Cancellations are different from returns — they happen pre-shipment and usually point to inventory/availability problems, payment failures, or buyer's remorse. Investigate alongside stock levels.",
+    "tags": ["cancellations", "category", "operations"]
+  },
+  {
+    "id": "trio-023",
+    "question": "Show me revenue split by department (Men, Women)",
+    "sql": "SELECT p.department, COUNT(*) AS units_sold, ROUND(SUM(oi.sale_price), 2) AS revenue, ROUND(SUM(oi.sale_price) * 100.0 / SUM(SUM(oi.sale_price)) OVER(), 2) AS revenue_share_pct FROM `bigquery-public-data.thelook_ecommerce.order_items` oi JOIN `bigquery-public-data.thelook_ecommerce.products` p ON p.id = oi.product_id WHERE oi.status NOT IN ('Cancelled','Returned') GROUP BY p.department ORDER BY revenue DESC",
+    "report": "Department-level revenue with each department's share of the total. The share % is the right number for capacity planning (inventory, marketing spend, merchandising); raw revenue alone can mislead when one side has a much larger catalogue.",
+    "tags": ["revenue", "department", "share"]
+  },
+  {
+    "id": "trio-024",
+    "question": "What is the median basket size in the last 90 days?",
+    "sql": "SELECT APPROX_QUANTILES(num_of_item, 100)[OFFSET(50)] AS median_items_per_order, ROUND(AVG(num_of_item), 2) AS avg_items_per_order, COUNT(*) AS orders FROM `bigquery-public-data.thelook_ecommerce.orders` WHERE status NOT IN ('Cancelled','Returned') AND DATE(created_at) >= DATE_SUB(CURRENT_DATE(), INTERVAL 90 DAY)",
+    "report": "Median (and mean) items per order over the last 90 days. Median is more robust than mean for basket size — a few large bulk orders can pull the average up without representing typical buyer behaviour. Compare to historical median to detect bundling effectiveness.",
+    "tags": ["aov", "basket_size", "trailing_90"]
+  },
+  {
+    "id": "trio-025",
+    "question": "What is the year-over-year revenue growth?",
+    "sql": "WITH yearly AS (SELECT EXTRACT(YEAR FROM created_at) AS yr, ROUND(SUM(sale_price), 2) AS revenue FROM `bigquery-public-data.thelook_ecommerce.order_items` WHERE status NOT IN ('Cancelled','Returned') GROUP BY yr) SELECT yr, revenue, LAG(revenue) OVER (ORDER BY yr) AS prev_revenue, ROUND(100 * (revenue - LAG(revenue) OVER (ORDER BY yr)) / NULLIF(LAG(revenue) OVER (ORDER BY yr), 0), 2) AS yoy_pct FROM yearly ORDER BY yr",
+    "report": "Annual revenue with year-over-year percentage change. Two caveats: the first row has no prior year to compare against (NULL), and the current year is partial — the YoY % for the current year is misleading until December. Apply seasonality adjustment for executive comms.",
+    "tags": ["revenue", "growth", "yearly", "yoy"]
   }
 ]

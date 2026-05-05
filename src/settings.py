@@ -20,9 +20,13 @@ def _get(key: str, default: str | None = None, required: bool = False) -> str:
 GOOGLE_API_KEY = _get("GOOGLE_API_KEY", required=False)
 GOOGLE_CLOUD_PROJECT = _get("GOOGLE_CLOUD_PROJECT", required=False)
 
-GEMINI_MODEL_PRO = _get("GEMINI_MODEL_PRO", "gemini-2.5-pro")
-GEMINI_MODEL_FLASH = _get("GEMINI_MODEL_FLASH", "gemini-2.5-flash")
-GEMINI_EMBEDDING_MODEL = _get("GEMINI_EMBEDDING_MODEL", "text-embedding-004")
+# Defaults are free-tier-friendly. gemini-2.5-pro is on a strict free
+# tier (limit=0 on auto-created AI Studio projects), so the default
+# "primary" tier is Flash and the fallback is Flash-Lite. Override in
+# .env if you have paid quota and want Pro.
+GEMINI_MODEL_PRO = _get("GEMINI_MODEL_PRO", "gemini-2.5-flash")
+GEMINI_MODEL_FLASH = _get("GEMINI_MODEL_FLASH", "gemini-2.5-flash-lite")
+GEMINI_EMBEDDING_MODEL = _get("GEMINI_EMBEDDING_MODEL", "gemini-embedding-001")
 
 DATASET = "bigquery-public-data.thelook_ecommerce"
 ALLOWED_TABLES = ("orders", "order_items", "products", "users")

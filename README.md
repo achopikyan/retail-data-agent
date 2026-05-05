@@ -257,7 +257,7 @@ To **change the report tone**, edit `config/personas.yaml` and change the `activ
 
 ## Notes on framework version
 
-The pinned `requirements.txt` uses `langgraph>=0.2.0` (the stable OSS release). The original assignment mentions LangGraph V1 as preferred — the public API differences are minor and the wiring in `src/graph/builder.py` ports cleanly to V1 by swapping the import path.
+`requirements.txt` floors `langgraph>=0.2.0`; in practice `pip install` resolves to **LangGraph 1.x** today, which is what the assignment recommends. The graph wiring in `src/graph/builder.py` (`StateGraph`, `add_node`, `add_edge`, `add_conditional_edges`, `START`, `END`, `compile()`) is identical between 0.2 and 1.x.
 
 ---
 

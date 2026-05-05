@@ -78,23 +78,64 @@ flowchart TB
 
 ### 3.1 Hybrid Intelligence — Golden Bucket
 
-**Storage**
-- Trios are stored as a JSON file (`data/golden_trios.json`) in the prototype. In production this becomes a GCS bucket (`gs://retail-agent-golden/trios/`) plus an index in **Vertex AI Vector Search** (or pgvector on Cloud SQL).
-- Schema per Trio: `{ id, question, sql, report, tags, embedding, author, created_at, quality_score }`.
+The Golden Bucket is the agent's institutional memory: 25 hand-curated `(question, sql, report)` Trios bootstrapped at install, plus everything the curator job has promoted from production traffic.
 
-**Retrieval at query time**
-- Embed the user question with `text-embedding-004` (Google).
-- Cosine search over the cached embeddings; **k = 3**.
-- The retrieved Trios are injected as **few-shot examples** into the SQL generator prompt and as **style anchors** into the Report synthesizer prompt.
+#### Prototype storage (in this repo)
 
-**Update path (write to bucket)**
-- Every interaction emits a record to a `pending_trios` SQLite table: `(trace_id, user_id, question, sql, report, ts, feedback)`.
-- A **nightly Curator job** (a separate small LangGraph) runs and:
-  1. Filters to records with 👍 feedback or no negative feedback after 24h.
-  2. **Deduplicates** — for each candidate, checks cosine similarity against existing Trios; rejects if `≥ 0.92`.
-  3. **Quality-scores** with an LLM-as-judge against a rubric (`{answers_question, factual_consistency, sql_correctness, report_clarity}` 1–5).
-  4. Promotes candidates with avg ≥ 4.0 into the production index. Lower-scored go to a quarantine queue for human review.
-- Why nightly batch and not online: prevents poisoning the bucket with one bad accidentally-up-voted answer; lets a human review borderline cases.
+- **`data/golden_trios.json`** — flat JSON array, one object per Trio. Authoritative seed set, version-controlled in the repo so the demo is fully reproducible.
+- **`data/curated_trios.json`** — gitignored, written by the curator. Same schema. Loaded *additively* by `GoldenBucket.load()` so the seed is never mutated.
+- **`data/golden_trios.embeddings.npy`** — numpy `(N, 3072) float32` cache. Re-built automatically when its row count diverges from the merged Trio list (so adding a Trio + restarting is enough).
+- **Schema per Trio:** `{ id, question, sql, report, tags }`. (Author/quality/created_at fields are added on promotion in production.)
+
+This is *deliberately* the prototype path — single file, no extra creds beyond BigQuery + Gemini. It demonstrates the read mechanism (cosine top-k → few-shot injection) and the write mechanism (curator promotes to a separate file) without committing the reviewer to a real cloud bucket.
+
+#### Production storage — actual data lake
+
+```
+gs://retail-agent-golden/                                  ← bucket, versioning ON
+├── trios/
+│   ├── v0001/                                             ← immutable version directory
+│   │   ├── trio-001.json
+│   │   ├── trio-002.json
+│   │   └── ...
+│   ├── v0002/                                             ← curator emits new version
+│   │   ├── (everything in v0001)
+│   │   └── trio-N.json
+│   └── ...
+├── pending/                                               ← raw turn captures
+│   └── 2026/05/06/<trace_id>.json                         ← partitioned for cheap scan
+├── manifest/
+│   ├── active.json                                        ← {"version": "v0002", "promoted_at": "..."}
+│   └── history.jsonl                                      ← append-only audit
+└── archive/                                               ← demoted / human-rejected Trios
+    └── <id>.json
+```
+
+- **Format**: one JSON object per Trio (not Parquet — Trios are heterogeneous text and we want them human-readable in the bucket). Files are small (≤ 4 KB each), so no aggregation overhead.
+- **Versioning**: `trios/vNNNN/` directories are **immutable**. Promotion = new directory + atomic update of `manifest/active.json`. Rollback = point manifest at the prior version. GCS object versioning is enabled as a safety net.
+- **Catalog**: an external BigQuery table over `trios/active/` exposes the bucket to ad-hoc analysts (`SELECT * FROM golden.trios WHERE category='customers'`).
+- **Vector index**: a separate **Vertex AI Vector Search** index, keyed by `trio_id`. Embeddings recomputed by a Cloud Run job whenever `manifest/active.json` flips. Retrieval at query time = `MatchService.find_neighbors(query_vector, k=3)` — sub-100 ms p95.
+- **Bucket access**: agent runs as a service account with `roles/storage.objectViewer` on `gs://retail-agent-golden/trios/active/` only (no write). Curator job has a separate SA with write access; humans never write directly.
+
+#### Retrieval at query time
+
+1. Embed the user question with `gemini-embedding-001` (Google).
+2. (Prototype) Cosine search over the cached numpy matrix; **k = 3**.
+   (Production) `MatchService.find_neighbors(vector, k=3)` against Vertex AI Vector Search.
+3. Retrieved Trios are injected as **few-shot examples** into the SQL generator prompt and as **style anchors** into the Report synthesizer prompt — both prompts hold the full Trio text, not just the question, so analyst voice and SQL idioms transfer.
+
+#### Update path (write to bucket)
+
+1. Every successful turn writes a row to a `pending_trios` table (SQLite locally; Cloud SQL/Postgres in prod): `(trace_id, user_id, question, sql, report, ts, feedback, promoted)`.
+2. CLI/web-UI `/up`/`/down` set `feedback`. The 24-hour grace window prevents accidental thumbs-ups from auto-promoting.
+3. **Curator job** (Cloud Run + Cloud Scheduler nightly):
+   1. Selects rows with `feedback='up'`, `promoted=0`, `ts > 24h ago`.
+   2. **Embeds** each candidate's question.
+   3. **Deduplicates** — cosine vs. every Trio in `manifest/active.json`. Rejects if `max_sim ≥ 0.92`.
+   4. **Quality-scores** with a Gemini judge: `{sql_correctness, report_clarity, factual_consistency, generalizability}` on 1–5. Avg `≥ 4.0` → promote.
+   5. **Atomic flip**: writes `trios/vNNNN/` containing the previous active set + new promotions, then updates `manifest/active.json` in a single object write.
+   6. Marks source rows `promoted=1`, fires a Vertex AI Vector Search **re-index** Cloud Function.
+4. **Why nightly batch and not online**: prevents a single accidentally-up-voted bad answer from poisoning few-shot context for everyone; gives humans a review window for borderline cases (the quarantine queue is a separate dashboard fed by `archive/`).
 
 ### 3.2 Safety & PII Masking *(implemented in prototype)*
 
@@ -158,7 +199,7 @@ Keys whitelisted: `report_format` (table | bullets | prose), `default_time_windo
 
 **Hybrid Intelligence write path detail.** A new turn ends with the Reporter writing to `pending_trios(trace_id, user_id, question, sql, report, ts, feedback, promoted)`. CLI `/up` and `/down` set `feedback`. `scripts/curate.py` then:
 1. `list_unpromoted_upvoted()` returns the candidate set.
-2. Each candidate's question is embedded with `text-embedding-004`.
+2. Each candidate's question is embedded with `gemini-embedding-001`.
 3. Cosine vs. seed + already-curated. If `≥ 0.92` → drop as duplicate.
 4. Surviving candidates are scored by a strict Gemini judge on `{sql_correctness, report_clarity, factual_consistency, generalizability}` 1–5.
 5. Average ≥ `--min-score` (default 4.0) → appended to `data/curated_trios.json` and the source row is marked `promoted=1`.
@@ -271,7 +312,7 @@ personas:
 |---|---|
 | **Gemini 2.5 Pro** for SQL gen + report synthesis | Strongest BigQuery-dialect SQL generation among the free-tier-accessible models; long context fits schema + multi-Trio few-shot easily. |
 | **Gemini 2.5 Flash** as fallback + router | Fast, cheap, generous free tier; degrading to Flash is a real-world useful capacity guard. |
-| **`text-embedding-004`** | Same provider, no extra credentials, 768-dim is plenty for ~12–10k Trios. |
+| **`gemini-embedding-001`** | Same provider as the chat models, no extra credentials needed; 3072-dim is plenty for ≤ a few thousand Trios. |
 | **BigQuery** | Required by the assignment. The free tier (1 TB/mo) plus dataset partitioning makes the demo essentially free. |
 | **ChromaDB / pgvector / Vertex AI Vector Search** *(prod path)* | We use a numpy-backed JSON cache in this prototype; the upgrade path is determined by team operational preference (managed vs self-hosted). |
 | **SQLite / Cloud SQL** | Zero-ops in prototype, drop-in to Postgres in prod. |
