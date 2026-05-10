@@ -12,7 +12,7 @@ import logging
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from src.api.routes import audit, chat, feedback, personas, prefs, reports, sessions
+from src.api.routes import audit, chat, feedback, personas, prefs, reports, sessions, threads
 from src.obs.log import setup_logging
 
 setup_logging(logging.INFO)
@@ -51,3 +51,4 @@ app.include_router(feedback.router)
 app.include_router(prefs.router)
 app.include_router(personas.router)
 app.include_router(sessions.router)
+app.include_router(threads.router)

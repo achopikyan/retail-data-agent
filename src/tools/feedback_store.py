@@ -59,6 +59,17 @@ def init_db() -> None:
             );
             CREATE INDEX IF NOT EXISTS idx_pending_trios_feedback
                 ON pending_trios(feedback);
+
+            CREATE TABLE IF NOT EXISTS router_corrections (
+                id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                trace_id        TEXT NOT NULL,
+                user_id         TEXT NOT NULL,
+                raw_question    TEXT NOT NULL,
+                refused_intent  TEXT NOT NULL,
+                ts              REAL NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_router_corrections_user_ts
+                ON router_corrections(user_id, ts DESC);
             """
         )
 
@@ -106,6 +117,34 @@ def mark_promoted(trace_ids: List[str]) -> None:
             f"UPDATE pending_trios SET promoted = 1 WHERE trace_id IN ({placeholders})",
             tuple(trace_ids),
         )
+
+
+def record_router_correction(
+    trace_id: str, user_id: str, raw_question: str, refused_intent: str
+) -> None:
+    """User flagged a refusal as wrong. Logged so we can tune the
+    classifier from real false positives."""
+    init_db()
+    with connect() as conn:
+        conn.execute(
+            "INSERT INTO router_corrections "
+            "(trace_id, user_id, raw_question, refused_intent, ts) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (trace_id, user_id, raw_question, refused_intent, time.time()),
+        )
+
+
+def router_correction_count(user_id: Optional[str] = None) -> int:
+    """For the router-FP-rate metric and per-user abuse throttling."""
+    init_db()
+    if user_id is None:
+        row = query_one("SELECT COUNT(*) AS c FROM router_corrections")
+    else:
+        row = query_one(
+            "SELECT COUNT(*) AS c FROM router_corrections WHERE user_id = ?",
+            (user_id,),
+        )
+    return int(row["c"]) if row else 0
 
 
 def stats() -> dict:

@@ -12,7 +12,7 @@ from typing import Any, Dict
 
 from src.graph.builder import build_graph
 from src.llm.gemini import GeminiLLM
-from src.tools import feedback_store, prefs_store, reports_store
+from src.tools import feedback_store, prefs_store, reports_store, threads_store
 from src.tools.bq import BigQueryRunner, get_schema_summary
 from src.tools.golden_bucket import GoldenBucket
 from src import settings
@@ -37,6 +37,7 @@ class Resources:
         reports_store.init_db()
         feedback_store.init_db()
         prefs_store.init_db()
+        threads_store.init_db()
         logger.info("API resources ready")
 
     @classmethod

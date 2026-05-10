@@ -43,6 +43,7 @@ export default function MessageBubble({
           >
             {text}
           </p>
+          {meta && <div className="mt-1 text-[10px] text-ink-4">{meta}</div>}
         </div>
       </article>
     );

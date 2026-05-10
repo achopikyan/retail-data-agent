@@ -13,6 +13,7 @@ export default function App() {
       <Route element={<Layout />}>
         <Route index element={<Navigate to="/chat" replace />} />
         <Route path="/chat" element={<ChatView />} />
+        <Route path="/chat/:threadId" element={<ChatView />} />
         <Route path="/reports" element={<ReportsView />} />
         <Route path="/audit" element={<AuditView />} />
         <Route path="/prefs" element={<PrefsView />} />

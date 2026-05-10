@@ -10,3 +10,4 @@ pytest>=7.4.0
 fastapi>=0.115.0
 uvicorn[standard]>=0.30.0
 sse-starlette>=2.1.0
+rank-bm25>=0.2.2

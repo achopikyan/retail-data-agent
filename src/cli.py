@@ -5,6 +5,7 @@ Usage:
 """
 from __future__ import annotations
 
+import datetime as dt
 import logging
 import sys
 import traceback
@@ -16,7 +17,7 @@ from src import settings
 from src.graph.builder import build_graph
 from src.llm.gemini import GeminiLLM
 from src.obs.log import SessionLog, counters_snapshot, setup_logging
-from src.tools import feedback_store, prefs_store, reports_store
+from src.tools import feedback_store, prefs_store, reports_store, threads_store
 from src.tools.bq import BigQueryRunner, get_schema_summary
 from src.tools.golden_bucket import GoldenBucket
 from src.tools.persona import load_active_persona
@@ -42,6 +43,13 @@ Available commands:
   /feedback                   — show feedback stats (total, up, down, promoted)
   /prefs                      — show your preferences
   /prefs set <key>=<value>    — set a pref (key in {report_format, default_time_window, preferred_currency})
+  /threads [--archived]       — list your conversation threads (active marked with *)
+  /thread                     — show the active thread's title and turn count
+  /thread new [title]         — start a fresh thread (and switch to it)
+  /thread switch <id>         — switch active thread (id may be a unique prefix)
+  /thread rename <title>      — rename the active thread
+  /thread archive [id]        — archive a thread (default: active)
+  /thread delete <id>         — delete a thread (asks for confirmation)
   /quit                       — exit
 
 Anything else is treated as a natural-language question against the
@@ -58,6 +66,9 @@ class Session:
     last_report: Optional[str] = None
     last_question: Optional[str] = None
     pending_action: Optional[dict] = field(default=None)
+    # Active conversation thread for this CLI session. Reset on /login
+    # so a new user never inherits another user's transcript.
+    thread_id: Optional[str] = None
 
 
 # --- helpers ---------------------------------------------------------------
@@ -102,6 +113,8 @@ def cmd_login(s: Session, args: str) -> None:
         return
     s.current_user = user
     s.current_role = role
+    # New user → new thread. Never inherit transcript across users.
+    s.thread_id = None
     print(f"now logged in as {user} (role: {role})")
 
 
@@ -334,6 +347,126 @@ def cmd_prefs(s: Session, args: str) -> None:
     print("usage: /prefs        OR        /prefs set <key>=<value>")
 
 
+# --- thread commands -------------------------------------------------------
+
+
+def _resolve_thread_arg(arg: str, user_id: str) -> Optional[str]:
+    """Match a thread argument against the user's threads.
+
+    Accepts a full thread_id, a unique prefix, or — fallback — checks
+    the literal value. Returns None if no unique match (caller prints
+    the error message). Only ever returns ids the user owns.
+    """
+    arg = arg.strip()
+    if not arg:
+        return None
+    candidates = [
+        t for t in threads_store.list_for_user(user_id, include_archived=True)
+        if t["thread_id"].startswith(arg)
+    ]
+    if len(candidates) == 1:
+        return candidates[0]["thread_id"]
+    return None
+
+
+def _short_id(thread_id: str) -> str:
+    return thread_id[:8]
+
+
+def cmd_threads(s: Session, args: str) -> None:
+    include_archived = "--archived" in args.split()
+    rows = threads_store.list_for_user(s.current_user, include_archived=include_archived)
+    if not rows:
+        print("(no threads — your first question will create one)")
+        return
+    for t in rows:
+        marker = "*" if t["thread_id"] == s.thread_id else " "
+        title = t.get("title") or "(untitled)"
+        flag = " [archived]" if t.get("archived") else ""
+        last = t.get("last_message_at")
+        last_str = _ts(last) if last else "(no messages yet)"
+        print(f"  {marker} {_short_id(t['thread_id'])}  {title}{flag}   last: {last_str}")
+    print(f"\nactive: {_short_id(s.thread_id) if s.thread_id else '(none)'}")
+
+
+def cmd_thread(s: Session, args: str) -> None:
+    parts = args.strip().split(maxsplit=1)
+    sub = parts[0].lower() if parts else ""
+    rest = parts[1] if len(parts) > 1 else ""
+
+    if not sub:
+        # Show active thread info.
+        if not s.thread_id:
+            print("(no active thread — your next question will create one)")
+            return
+        t = threads_store.get_thread(s.thread_id)
+        if not t:
+            print("(active thread not found in store; will be recreated on next question)")
+            return
+        title = t.get("title") or "(untitled)"
+        count = threads_store.turn_count(s.thread_id)
+        print(f"thread: {_short_id(s.thread_id)}  title: {title}  turns: {count}")
+        return
+
+    if sub == "new":
+        s.thread_id = threads_store.new_thread_id()
+        title = rest.strip() or None
+        threads_store.ensure_thread(s.thread_id, s.current_user, title=title)
+        print(f"created + switched to thread {_short_id(s.thread_id)}"
+              + (f"  title: {title}" if title else ""))
+        return
+
+    if sub == "switch":
+        target = _resolve_thread_arg(rest, s.current_user)
+        if not target:
+            print(f"no unique thread matches '{rest}'. Try /threads to list.")
+            return
+        s.thread_id = target
+        t = threads_store.get_thread(target)
+        title = (t.get("title") if t else None) or "(untitled)"
+        print(f"switched to {_short_id(target)}  title: {title}")
+        return
+
+    if sub == "rename":
+        if not s.thread_id:
+            print("no active thread to rename. Try /thread new <title>.")
+            return
+        title = rest.strip()
+        if not title:
+            print("usage: /thread rename <title>")
+            return
+        threads_store.rename(s.thread_id, title)
+        print(f"renamed {_short_id(s.thread_id)} → {title}")
+        return
+
+    if sub == "archive":
+        target = _resolve_thread_arg(rest, s.current_user) if rest else s.thread_id
+        if not target:
+            print("no thread to archive. Specify an id or have an active thread.")
+            return
+        threads_store.set_archived(target, True)
+        print(f"archived {_short_id(target)}")
+        if target == s.thread_id:
+            s.thread_id = None  # next question will create a fresh one
+        return
+
+    if sub == "delete":
+        target = _resolve_thread_arg(rest, s.current_user)
+        if not target:
+            print(f"no unique thread matches '{rest}'. Try /threads to list.")
+            return
+        if not _confirm(f"delete thread {_short_id(target)} and all its messages? [y/N] "):
+            print("(cancelled)")
+            return
+        threads_store.delete_thread(target)
+        print(f"deleted {_short_id(target)}")
+        if target == s.thread_id:
+            s.thread_id = None
+        return
+
+    print(f"unknown subcommand: /thread {sub}. Type /help for the list.")
+
+
 # --- main loop -------------------------------------------------------------
 
 
@@ -352,6 +485,7 @@ def main() -> int:
         reports_store.init_db()
         feedback_store.init_db()
         prefs_store.init_db()
+        threads_store.init_db()
     except Exception as e:  # noqa: BLE001
         print(f"Failed to initialize: {e}", file=sys.stderr)
         traceback.print_exc()
@@ -426,6 +560,10 @@ def main() -> int:
                     cmd_feedback(s)
                 elif cmd == "prefs":
                     cmd_prefs(s, rest)
+                elif cmd == "threads":
+                    cmd_threads(s, rest)
+                elif cmd == "thread":
+                    cmd_thread(s, rest)
                 else:
                     print(f"unknown command: /{cmd}. Type /help for the list.")
             except Exception as e:  # noqa: BLE001
@@ -435,11 +573,27 @@ def main() -> int:
 
         # Treat as natural-language question — invoke the graph.
         trace_id = uuid.uuid4().hex[:10]
-        session_log.event("turn_start", trace_id=trace_id, user=s.current_user, user_msg=user)
+        if s.thread_id is None:
+            s.thread_id = threads_store.new_thread_id()
+            threads_store.ensure_thread(s.thread_id, s.current_user)
+        history = threads_store.get_recent_messages(s.thread_id, settings.MAX_HISTORY_MESSAGES)
+        now_utc = dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        session_log.event(
+            "turn_start",
+            trace_id=trace_id,
+            user=s.current_user,
+            thread_id=s.thread_id,
+            history_len=len(history),
+            now_utc=now_utc,
+            user_msg=user,
+        )
         initial = {
             "question": user,
             "user_id": s.current_user,
             "trace_id": trace_id,
+            "thread_id": s.thread_id,
+            "history": history,
+            "now_utc": now_utc,
             "sql_attempts": 0,
             "resources": resources,
         }
@@ -454,6 +608,19 @@ def main() -> int:
         msg = final.get("final_message") or "(no output)"
         print(f"\nagent> {msg}\n")
         session_log.event("turn_end", trace_id=trace_id, output_chars=len(msg))
+
+        # Persist transcript turn — only on a real analytical report.
+        if final.get("report"):
+            try:
+                threads_store.append_turn(
+                    thread_id=s.thread_id,
+                    user_id=s.current_user,
+                    user_question=final.get("raw_question") or user,
+                    assistant_response=final["report"],
+                    trace_id=trace_id,
+                )
+            except Exception as e:  # noqa: BLE001
+                logging.warning("Failed to persist transcript turn: %s", e)
 
         # Track for /save and /up //down
         s.last_trace_id = trace_id

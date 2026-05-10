@@ -43,3 +43,24 @@ LOG_DIR = ROOT / _get("LOG_DIR", "logs")
 SQL_RETRY_LIMIT = int(_get("SQL_RETRY_LIMIT", "2"))
 LLM_RETRY_LIMIT = int(_get("LLM_RETRY_LIMIT", "3"))
 DEFAULT_USER_ID = _get("DEFAULT_USER_ID", "demo_manager")
+
+# Golden Bucket retrieval mode. "hybrid" combines cosine (semantic) +
+# BM25 (lexical) via Reciprocal Rank Fusion — the production-RAG default.
+# "cosine" / "bm25" are available for A/B comparison without code changes.
+RETRIEVAL_MODE = _get("RETRIEVAL_MODE", "hybrid")  # "cosine" | "bm25" | "hybrid"
+# k_rrf in the RRF formula (1 / (k_rrf + rank)). 60 is the de-facto standard
+# from the original RRF paper; smaller values weight top ranks more heavily.
+RETRIEVAL_RRF_K = int(_get("RETRIEVAL_RRF_K", "60"))
+# How deep to read each ranked list before fusing. Trios outside both
+# top-N lists contribute zero, so smaller is faster but riskier.
+RETRIEVAL_FUSION_DEPTH = int(_get("RETRIEVAL_FUSION_DEPTH", "20"))
+
+# How many recent messages (user + assistant) to load into the
+# contextualize step. Bounded so prompt size stays predictable on long
+# threads. Past this, older turns are not summarized — production tier-3
+# would add vector retrieval over them.
+MAX_HISTORY_MESSAGES = int(_get("MAX_HISTORY_MESSAGES", "10"))
+
+# Hard cap on turns per thread before the system nudges the user to
+# start a fresh thread. Keeps prompt cost bounded and resolution sharp.
+THREAD_TURN_CAP = int(_get("THREAD_TURN_CAP", "20"))
